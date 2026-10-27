@@ -1,0 +1,63 @@
+name: Release
+
+# Modul Go diterbitkan lewat tag, bukan lewat registry: begitu tag v* terdorong,
+# proxy.golang.org tinggal diminta mengambilnya.
+#
+#   git tag v0.1.0
+#   git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      # Dibutuhkan untuk membuat GitHub Release di bawah.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - run: go vet ./...
+      - run: go test -race ./...
+
+      - name: Tag harus cocok dengan module path
+        run: |
+          MODULE="$(go list -m)"
+          MAJOR="${GITHUB_REF_NAME%%.*}"   # mis. v2 dari v2.1.0
+          if [ "$MAJOR" != "v0" ] && [ "$MAJOR" != "v1" ]; then
+            case "$MODULE" in
+              */"$MAJOR") ;;
+              *)
+                echo "Tag $GITHUB_REF_NAME butuh module path berakhiran /$MAJOR, sekarang $MODULE."
+                exit 1
+                ;;
+            esac
+          fi
+
+      - name: Buat GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Minta proxy.golang.org mengambil versi ini
+        run: |
+          MODULE="$(go list -m)"
+          GOPROXY=proxy.golang.org go list -m "$MODULE@$GITHUB_REF_NAME"
+
+      - name: Langkah terakhir
+        run: |
+          MODULE="$(go list -m)"
+          {
+            echo "### $GITHUB_REF_NAME sudah dirilis"
+            echo
+            echo '```bash'
+            echo "go get $MODULE@$GITHUB_REF_NAME"
+            echo '```'
+            echo
+            echo "Dokumentasinya terbit otomatis di https://pkg.go.dev/$MODULE"
+          } >> "$GITHUB_STEP_SUMMARY"

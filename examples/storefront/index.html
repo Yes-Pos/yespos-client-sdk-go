@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Toko YesPOS</title>
+<style>
+	:root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 15%, transparent); }
+	* { box-sizing: border-box; }
+	body { margin: 0 auto; padding: 24px 16px 64px; max-width: 720px;
+	       font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+	h1 { font-size: 1.4rem; margin: 0 0 4px; }
+	h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 28px 0 8px; }
+	.muted { opacity: .65; }
+	.row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+	.row img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; }
+	.grow { flex: 1; min-width: 0; }
+	.name { font-weight: 600; }
+	button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line);
+	         background: canvas; color: inherit; cursor: pointer; }
+	button[disabled] { opacity: .45; cursor: not-allowed; }
+	button.primary { background: currentColor; border-color: transparent; }
+	button.primary span { color: canvas; }
+	input, select { font: inherit; padding: 8px 10px; width: 100%; border-radius: 8px;
+	                border: 1px solid var(--line); background: canvas; color: inherit; }
+	label { display: block; margin: 10px 0; font-size: .85rem; }
+	label span { display: block; opacity: .65; margin-bottom: 4px; }
+	.total { display: flex; justify-content: space-between; font-weight: 600; padding: 12px 0; }
+	.box { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 16px; }
+	.error { color: #c0392b; margin-top: 12px; }
+	code { word-break: break-all; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>Toko YesPOS</h1>
+<p class="muted" id="outlet">Memuat…</p>
+
+<div id="catalog"></div>
+
+<h2>Keranjang</h2>
+<div id="cart"><p class="muted">Keranjang masih kosong.</p></div>
+
+<form id="checkout" hidden>
+	<label><span>Nama</span><input name="name" required autocomplete="name" /></label>
+	<label><span>Email</span><input name="email" type="email" required autocomplete="email" /></label>
+	<label><span>Nomor telepon</span><input name="phone" required autocomplete="tel" /></label>
+	<label><span>Metode pembayaran</span><select name="payment" required></select></label>
+	<button class="primary" type="submit"><span>Bayar</span></button>
+	<p class="error" id="error" hidden></p>
+</form>
+
+<div class="box" id="result" hidden></div>
+
+<script>
+const rupiah = (value) => 'Rp' + Number(value).toLocaleString('id-ID');
+const el = (id) => document.getElementById(id);
+const cart = new Map(); // key: "produk|varian"
+
+// Semua panggilan menuju endpoint milik aplikasi ini sendiri — SDK YesPOS dan
+// secret-nya tetap di server.
+async function api(path, options) {
+	const response = await fetch(path, options);
+	const body = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(body.message || 'Permintaan gagal.');
+	return body;
+}
+
+function addToCart(product, variant) {
+	const key = product.uuid + '|' + (variant ? variant.uuid : '');
+	const line = cart.get(key) || {
+		product_uuid: product.uuid,
+		variant_uuid: variant ? variant.uuid : '',
+		name: variant ? product.name + ' - ' + variant.name : product.name,
+		price: variant ? variant.price : product.price,
+		quantity: 0
+	};
+	line.quantity += 1;
+	cart.set(key, line);
+	renderCart();
+}
+
+function renderCart() {
+	const container = el('cart');
+	container.textContent = '';
+	if (cart.size === 0) {
+		container.innerHTML = '<p class="muted">Keranjang masih kosong.</p>';
+		el('checkout').hidden = true;
+		return;
+	}
+
+	let total = 0;
+	for (const [key, line] of cart) {
+		total += line.price * line.quantity;
+		const row = document.createElement('div');
+		row.className = 'row';
+
+		const label = document.createElement('div');
+		label.className = 'grow';
+		label.innerHTML = '<div class="name"></div><div class="muted"></div>';
+		label.querySelector('.name').textContent = line.name;
+		label.querySelector('.muted').textContent = line.quantity + ' × ' + rupiah(line.price);
+
+		const remove = document.createElement('button');
+		remove.type = 'button';
+		remove.textContent = '−';
+		remove.onclick = () => {
+			line.quantity -= 1;
+			if (line.quantity < 1) cart.delete(key);
+			renderCart();
+		};
+
+		const add = document.createElement('button');
+		add.type = 'button';
+		add.textContent = '+';
+		add.onclick = () => { line.quantity += 1; renderCart(); };
+
+		row.append(label, remove, add);
+		container.append(row);
+	}
+
+	const sum = document.createElement('div');
+	sum.className = 'total';
+	// Total ini hanya perkiraan untuk ditampilkan; server menghitungnya ulang
+	// dari harga di API saat checkout.
+	sum.innerHTML = '<span>Total</span><span>' + rupiah(total) + '</span>';
+	container.append(sum);
+	el('checkout').hidden = false;
+}
+
+function renderCatalog(data) {
+	el('outlet').textContent = data.outlet;
+	const container = el('catalog');
+	container.textContent = '';
+
+	for (const category of data.categories) {
+		const heading = document.createElement('h2');
+		heading.textContent = category.name;
+		container.append(heading);
+
+		for (const product of category.products) {
+			const row = document.createElement('div');
+			row.className = 'row';
+
+			if (product.image) {
+				const image = document.createElement('img');
+				image.src = product.image;
+				image.alt = '';
+				row.append(image);
+			}
+
+			const harga = product.price_max !== product.price
+				? rupiah(product.price) + ' – ' + rupiah(product.price_max)
+				: rupiah(product.price);
+			const label = document.createElement('div');
+			label.className = 'grow';
+			label.innerHTML = '<div class="name"></div><div class="muted"></div>';
+			label.querySelector('.name').textContent = product.name;
+			label.querySelector('.muted').textContent = product.sold_out ? harga + ' · habis' : harga;
+			row.append(label);
+
+			if (product.variants && product.variants.length) {
+				const select = document.createElement('select');
+				for (const variant of product.variants) {
+					const option = document.createElement('option');
+					option.value = variant.uuid;
+					option.textContent = variant.name + ' · ' + rupiah(variant.price);
+					option.disabled = variant.sold_out;
+					select.append(option);
+				}
+				const add = document.createElement('button');
+				add.type = 'button';
+				add.textContent = 'Tambah';
+				add.disabled = product.sold_out;
+				add.onclick = () => addToCart(product, product.variants.find((v) => v.uuid === select.value));
+				row.append(select, add);
+			} else {
+				const add = document.createElement('button');
+				add.type = 'button';
+				add.textContent = 'Tambah';
+				add.disabled = product.sold_out;
+				add.onclick = () => addToCart(product, null);
+				row.append(add);
+			}
+
+			container.append(row);
+		}
+	}
+}
+
+function renderOrder(order) {
+	const box = el('result');
+	box.hidden = false;
+	const lines = ['<div class="name">Pesanan dibuat</div>',
+		'<p class="muted">Total ' + rupiah(order.total_payment) + ' · status ' + order.status + '</p>'];
+
+	// Tiap metode memberi petunjuk bayar di field yang berbeda.
+	if (order.qr_string) {
+		lines.push('<p>Pindai QRIS berikut:</p><p><code>' + order.qr_string + '</code></p>');
+	} else if (order.payment_no) {
+		lines.push('<p>Transfer ke virtual account <strong>' + order.payment_no + '</strong>' +
+			(order.payment_name ? ' a.n. ' + order.payment_name : '') + '.</p>');
+		if (order.expired_at) lines.push('<p class="muted">Bayar sebelum ' + order.expired_at + '.</p>');
+	} else if (order.app_link) {
+		lines.push('<p>Buka tautan ini di perangkat EDC: <code>' + order.app_link + '</code></p>');
+	}
+	box.innerHTML = lines.join('');
+
+	// Status akhir datang lewat callback; di halaman cukup dicek saat diminta,
+	// bukan dengan polling berkala.
+	const check = document.createElement('button');
+	check.type = 'button';
+	check.textContent = 'Cek status';
+	check.onclick = async () => {
+		check.disabled = true;
+		try {
+			renderOrder(await api('/api/orders/' + encodeURIComponent(order.uuid)));
+		} finally {
+			check.disabled = false;
+		}
+	};
+	box.append(check);
+}
+
+el('checkout').addEventListener('submit', async (event) => {
+	event.preventDefault();
+	const form = event.currentTarget;
+	const error = el('error');
+	error.hidden = true;
+	form.querySelector('button').disabled = true;
+
+	try {
+		const data = new FormData(form);
+		// Yang dikirim hanya produk dan jumlah: harga ditentukan server.
+		const order = await api('/api/checkout', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				lines: [...cart.values()].map(({ product_uuid, variant_uuid, quantity }) =>
+					({ product_uuid, variant_uuid, quantity })),
+				customer: { name: data.get('name'), email: data.get('email'), phone: data.get('phone') },
+				payment: data.get('payment')
+			})
+		});
+		cart.clear();
+		renderCart();
+		form.hidden = true;
+		renderOrder(order);
+	} catch (failure) {
+		error.textContent = failure.message;
+		error.hidden = false;
+	} finally {
+		form.querySelector('button').disabled = false;
+	}
+});
+
+(async () => {
+	try {
+		renderCatalog(await api('/api/catalog'));
+		const select = document.querySelector('select[name=payment]');
+		for (const method of await api('/api/payment-methods')) {
+			const option = document.createElement('option');
+			option.value = method.value;
+			option.textContent = method.label;
+			select.append(option);
+		}
+	} catch (failure) {
+		el('outlet').textContent = failure.message;
+	}
+})();
+</script>
+</body>
+</html>
