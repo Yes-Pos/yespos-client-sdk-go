@@ -226,14 +226,17 @@ Lalu dikirim sebagai header `va`, `signature`, dan `timestamp`. Fungsinya dieksp
 
 ## Contoh pemakaian
 
-Dua program siap jalan ada di [`examples/`](examples):
+Dua program siap jalan ada di repo tersendiri, [`example-go`](https://github.com/Yes-Pos/example-go):
 
 ```bash
-go run ./examples/quickstart     # CLI: katalog, metode pembayaran, buat order
-go run ./examples/storefront     # toko online di http://localhost:8080
+git clone https://github.com/Yes-Pos/example-go && cd example-go
+go run ./cmd/quickstart     # CLI: katalog, metode pembayaran, buat order
+go run ./cmd/storefront     # toko online di http://localhost:8080
 ```
 
-`storefront` memperagakan pola yang dipakai storefront sungguhan: SDK hanya di server, browser memanggil endpoint JSON milik aplikasi sendiri, dan harga selalu dihitung ulang dari API. Rinciannya di [`examples/README.md`](examples/README.md).
+`storefront` memperagakan pola yang dipakai storefront sungguhan: SDK hanya di server, browser memanggil endpoint JSON milik aplikasi sendiri, dan harga selalu dihitung ulang dari API.
+
+Untuk Laravel ada [`example-laravel`](https://github.com/Yes-Pos/example-laravel).
 
 ## SDK lain
 
